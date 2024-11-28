@@ -11,7 +11,7 @@ WINDOW_HEIGHT = 600
 NUM_BIRDS = 11
 NUM_LAMPPOSTS = 6
 FRAME_RATE = 60
-LAMPPOST_RESTORE_TIME = 5000
+LAMPPOST_RESTORE_TIME = 3500
 
 
 class Bird:
@@ -26,9 +26,15 @@ class Bird:
         self.time_sat = 0  # Время, которое птица уже просидела
         self.is_sitting = False
         self.current_lamppost = None
-        self.speed = 0.7  # Скорость движения птицы
+        self.speed = 0.9  # Скорость движения птицы
         self.flying_up = False  # Индикатор состояния полета вверх
         self.flying_up_time = 0  # Оставшееся время подъема
+
+        self.t = 0  # Прогресс движения от 0 до 1
+        self.total_time = None  # Общее время полета к столбу
+        self.x0 = None  # Начальная позиция X
+        self.y0 = None  # Начальная позиция Y
+        self.h = 50  # Высота параболы полета
 
     def update(self, delta_time, lampposts):
         if self.time_sat >= self.sitting_time:
@@ -36,49 +42,61 @@ class Bird:
             return
 
         if self.flying_up:
-            # Птица летит вверх
             self.y -= self.speed
-            # Уменьшаем оставшееся время подъема
             self.flying_up_time -= delta_time * 1000
             if self.flying_up_time <= 0:
                 self.flying_up = False
-                # Птица начинает искать новый столб после подъема
                 self.current_lamppost = None
         elif self.is_sitting:
-            self.time_sat += delta_time * 1000  # Увеличиваем время сидения
-            # Проверяем, не упал ли столб
+            self.time_sat += delta_time * 1000
             if self.current_lamppost and self.current_lamppost.status == 'fallen':
-                # Столб упал, птица начинает подъем
                 self.is_sitting = False
                 self.current_lamppost = None
                 self.flying_up = True
-                self.flying_up_time = 2000  # Птица поднимается вверх в течение 2 секунд
+                self.flying_up_time = 2000
         else:
-            # Ищем столб для посадки, если птица не сидит и не летит вверх
             if not self.current_lamppost:
                 available_lampposts = [
                     lp for lp in lampposts if lp.status == 'standing']
                 if available_lampposts:
                     self.current_lamppost = random.choice(available_lampposts)
-                    self.target_x = self.current_lamppost.x + self.current_lamppost.width/2
+                    self.target_x = self.current_lamppost.x + self.current_lamppost.width / 2
                     self.target_y = self.current_lamppost.y
+
+                    self.x0 = self.x
+                    self.y0 = self.y
+                    dx = self.target_x - self.x0
+                    dy = self.target_y - self.y0
+                    distance = (dx**2 + dy**2)**0.5
+                    self.total_time = distance / \
+                        (self.speed * FRAME_RATE)
+                    self.t = 0
+                    self.h = distance * 0.2
             else:
-                # Движение к столбу
-                dx = self.target_x - self.x
-                dy = self.target_y - self.y
-                distance = (dx**2 + dy**2)**0.5
-                if distance > self.speed:
-                    self.x += dx / distance * self.speed
-                    self.y += dy / distance * self.speed
+                if self.t < 1:
+                    if self.total_time != 0:
+                        self.t += delta_time / self.total_time
+                    else:
+                        self.t += delta_time / (self.total_time+0.1)
+                    if self.t >= 1:
+                        self.x = self.target_x
+                        self.y = self.target_y
+                        self.is_sitting = True
+                        self.current_lamppost.current_birds.append(self)
+                    else:
+                        t = self.t
+                        self.x = self.x0 + (self.target_x - self.x0) * t
+                        self.y = self.y0 + \
+                            (self.target_y - self.y0) * \
+                            t - self.h * 4 * t * (1 - t)
                 else:
-                    # Прибыли на столб
                     self.x = self.target_x
                     self.y = self.target_y
                     self.is_sitting = True
                     self.current_lamppost.current_birds.append(self)
 
     def fly_away(self):
-        # Удаляем птицу из списка птиц на столбе
+
         if self.current_lamppost and self in self.current_lamppost.current_birds:
             self.current_lamppost.current_birds.remove(self)
 
@@ -105,10 +123,8 @@ class LampPost:
     def update(self, delta_time):
         if self.status == 'standing':
             if len(self.current_birds) > self.max_birds:
-                # Столб падает
                 self.status = 'fallen'
                 self.fall_time = LAMPPOST_RESTORE_TIME
-                # Все птицы на этом столбе начинают искать новый столб
                 for bird in self.current_birds:
                     bird.is_sitting = False
                     bird.current_lamppost = None
@@ -116,9 +132,8 @@ class LampPost:
         else:
             self.fall_time -= delta_time * 1000
             if self.fall_time <= 0:
-                # Столб восстанавливается
                 self.status = 'standing'
-                self.color = QColor(139, 69, 19)  # Коричневый цвет
+                self.color = QColor(139, 69, 19)
 
 
 class SimulationWindow(QWidget):
@@ -127,23 +142,24 @@ class SimulationWindow(QWidget):
         self.setWindowTitle('Птицы и столбы')
         self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
 
+        # Инициализация состояния
         self.birds = []
         self.lampposts = []
+        self.paused = False  # пауза
 
         self.init_ui()
 
         # Загрузка начального состояния из файла
         self.load_initial_state()
 
-        # Таймер для управления обновлением
+        # Таймер
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_simulation)
         self.timer.start(1000 // FRAME_RATE)  # 60 FPS
 
         self.bird_spawn_timer = 0
         self.lamppost_spawn_timer = 0
-        self.bird_spawn_interval = 9999999999  # Интервал появления птиц в миллисекундах
-        # Интервал появления столбов в миллисекундах
+        self.bird_spawn_interval = 9999999999
         self.lamppost_spawn_interval = 9999999999
 
         self.last_time = 0
@@ -172,13 +188,25 @@ class SimulationWindow(QWidget):
             "Частота появления столбов", self)
         self.lamppost_frequency_label.move(20, 40)
 
+        # Кнопка для паузы
+        self.pause_button = QPushButton("Пауза", self)
+        self.pause_button.clicked.connect(self.toggle_pause)
+        self.pause_button.setGeometry(20, 100, 200, 30)
+
+    def toggle_pause(self):
+        if self.paused:
+            self.timer.start(1000 // FRAME_RATE)
+            self.pause_button.setText("Пауза")
+        else:
+            self.timer.stop()
+            self.pause_button.setText("Возобновить")
+        self.paused = not self.paused
+
     def update_bird_frequency(self):
-        # Обновляем интервал появления птиц на основе значения слайдера
         slider_value = self.bird_frequency_slider.value()
         self.bird_spawn_interval = max(1000, 10000 - slider_value * 90)
 
     def update_lamppost_frequency(self):
-        # Обновляем интервал появления птиц на основе значения слайдера
         slider_value = self.lamppost_frequency_slider.value()
         self.lamppost_spawn_interval = max(1000, 10000 - slider_value * 90)
 
@@ -240,13 +268,15 @@ class SimulationWindow(QWidget):
             data['birds'].append({
                 'x': bird.x,
                 'y': bird.y,
-
                 'sitting_time': bird.sitting_time
             })
         with open('initial_state.json', 'w') as f:
             json.dump(data, f)
 
     def update_simulation(self):
+        if self.paused:
+            return
+
         delta_time = 1 / FRAME_RATE
         self.bird_spawn_timer += delta_time * 1000
         self.lamppost_spawn_timer += delta_time * 1000
@@ -273,7 +303,7 @@ class SimulationWindow(QWidget):
 
     def spawn_new_bird(self):
         x = random.randint(50, WINDOW_WIDTH - 50)
-        y = random.randint(50, 150)
+        y = random.randint(10, 40)
         sitting_time = 100000
         bird = Bird(x, y, sitting_time)
         self.birds.append(bird)
@@ -299,11 +329,10 @@ class SimulationWindow(QWidget):
                 painter.drawRect(rect)
                 painter.drawRect(rect2)
             else:
-                # Рисуем падение столба
+
                 painter.setPen(QPen(Qt.darkGray))
                 painter.drawLine(lp.x, lp.y + lp.height, lp.x + lp.width, lp.y)
 
-        # Рисование птиц
         for bird in self.birds:
             painter.setBrush(QBrush(bird.color))
             painter.setPen(QPen(Qt.black))
@@ -311,12 +340,10 @@ class SimulationWindow(QWidget):
                                 bird.radius, bird.radius)
 
     def closeEvent(self, event):
-        # При закрытии окна сохраняем состояние
         self.save_initial_state()
         event.accept()
 
     def mousePressEvent(self, event):
-        # Обработка клика для установки или редактирования столба
         x = event.x()
         y = event.y()
         clicked_lamppost = None
