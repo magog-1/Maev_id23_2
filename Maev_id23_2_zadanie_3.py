@@ -26,14 +26,14 @@ class Bird:
         self.time_sat = 0  # Время, которое птица уже просидела
         self.is_sitting = False
         self.current_lamppost = None
-        self.speed = 0.9  # Скорость движения птицы
+        self.speed = 1.1  # Скорость движения птицы
         self.flying_up = False  # Индикатор состояния полета вверх
         self.flying_up_time = 0  # Оставшееся время подъема
 
         self.t = 0  # Прогресс движения от 0 до 1
         self.total_time = None  # Общее время полета к столбу
-        self.x0 = None  # Начальная позиция X
-        self.y0 = None  # Начальная позиция Y
+        self.x0 = None  # Начальная позиция
+        self.y0 = None 
         self.h = 50  # Высота параболы полета
 
     def update(self, delta_time, lampposts):
@@ -42,7 +42,19 @@ class Bird:
             return
 
         if self.flying_up:
-            self.y -= self.speed
+            self.target_x = self.x + random.randint(-100, 300)
+            self.target_y = -50
+
+            self.x0 = self.x
+            self.y0 = self.y
+            dx = self.target_x - self.x0
+            dy = self.target_y - self.y0
+            distance = (dx**2 + dy**2)**0.5
+            self.total_time = distance / self.speed  # Время полета в секундах
+            self.t = 0
+            self.h = 0
+
+            self.y -= self.speed + random.random()*3
             self.flying_up_time -= delta_time * 1000
             if self.flying_up_time <= 0:
                 self.flying_up = False
@@ -53,7 +65,7 @@ class Bird:
                 self.is_sitting = False
                 self.current_lamppost = None
                 self.flying_up = True
-                self.flying_up_time = 2000
+                self.flying_up_time = 5000 * random.random()
         else:
             if not self.current_lamppost:
                 available_lampposts = [
@@ -100,7 +112,6 @@ class Bird:
         if self.current_lamppost and self in self.current_lamppost.current_birds:
             self.current_lamppost.current_birds.remove(self)
 
-        # Птица улетает за пределы экрана
         self.x = -100
         self.y = -100
         self.is_sitting = False
@@ -117,8 +128,8 @@ class LampPost:
         self.color = QColor(139, 69, 19)
         self.max_birds = max_birds
         self.current_birds = []
-        self.status = 'standing'  # 'standing' или 'fallen'
-        self.fall_time = 0  # Время, оставшееся до восстановления
+        self.status = 'standing'
+        self.fall_time = 0
 
     def update(self, delta_time):
         if self.status == 'standing':
@@ -291,9 +302,15 @@ class SimulationWindow(QWidget):
             self.spawn_new_lamppost()
             self.lamppost_spawn_timer = 0
 
-        # Обновление птиц
+        birds_to_remove = []
         for bird in self.birds:
             bird.update(delta_time, self.lampposts)
+
+            if bird.flying_up and (bird.y < -50 or bird.y > WINDOW_HEIGHT + 50 or bird.x < -50 or bird.x > WINDOW_WIDTH + 50):
+                birds_to_remove.append(bird)
+
+        for bird in birds_to_remove:
+            self.birds.remove(bird)
 
         # Обновление столбов
         for lp in self.lampposts:
