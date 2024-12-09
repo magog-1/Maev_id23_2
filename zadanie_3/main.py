@@ -23,7 +23,7 @@ class SimulationWindow(QWidget):
         # Инициализация состояния
         self.birds = []
         self.lampposts = []
-        self.paused = False  # пауза
+        self.paused = False  
 
         self.init_ui()
 
