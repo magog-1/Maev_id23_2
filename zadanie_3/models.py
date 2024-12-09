@@ -17,7 +17,7 @@ class Bird:
         self.time_sat = 0  # Время, которое птица уже просидела
         self.is_sitting = False
         self.current_lamppost = None
-        self.speed = 1.1  # Скорость движения птицы
+        self.speed = 1.3  # Скорость движения птицы
         self.flying_up = False  # Индикатор состояния полета вверх
         self.flying_up_time = 0  # Оставшееся время подъема
 
@@ -27,36 +27,47 @@ class Bird:
         self.y0 = None  # Начальная позиция
         self.h = 50  # Высота параболы полета
 
+    def start_flying_up(self):
+        self.flying_up = True
+        self.is_sitting = False
+        self.flying_up_time = 10000 * random.random()
+        self.x0 = self.x
+        self.y0 = self.y
+        self.target_x = self.x + random.randint(-200, 200)
+        self.target_y = -100 + random.randint(-100, 150)
+        dx = self.target_x - self.x0
+        dy = self.target_y - self.y0
+        distance = (dx**2 + dy**2)**0.5
+        self.total_time = distance / (self.speed * FRAME_RATE)
+        self.t = 0
+        self.h = distance * 0.2  # Параметр для параболической траектории
+
     def update(self, delta_time, lampposts):
         if self.time_sat >= self.sitting_time:
             self.fly_away()
             return
 
         if self.flying_up:
-            self.target_x = self.x + random.randint(-100, 300)
-            self.target_y = -50
-
-            self.x0 = self.x
-            self.y0 = self.y
-            dx = self.target_x - self.x0
-            dy = self.target_y - self.y0
-            distance = (dx**2 + dy**2)**0.5
-            self.total_time = distance / self.speed  # Время полета в секундах
-            self.t = 0
-            self.h = 0
-
-            self.y -= self.speed + random.random()*3
-            self.flying_up_time -= delta_time * 1000
-            if self.flying_up_time <= 0:
+            if self.t < 1:
+                self.t += delta_time / self.total_time
+                if self.t >= 1:
+                    self.x = self.target_x
+                    self.y = self.target_y
+                    self.flying_up = False
+                else:
+                    t = self.t
+                    self.x = self.x0 + (self.target_x - self.x0) * t
+                    self.y = self.y0 + (self.target_y - self.y0) * \
+                        t - self.h * 4 * t * (1 - t)
+            else:
                 self.flying_up = False
-                self.current_lamppost = None
         elif self.is_sitting:
             self.time_sat += delta_time * 1000
             if self.current_lamppost and self.current_lamppost.status == 'fallen':
-                self.is_sitting = False
+                if self in self.current_lamppost.current_birds:
+                    self.current_lamppost.current_birds.remove(self)
                 self.current_lamppost = None
-                self.flying_up = True
-                self.flying_up_time = 5000 * random.random()
+                self.start_flying_up()
         else:
             if not self.current_lamppost:
                 available_lampposts = [
@@ -71,8 +82,7 @@ class Bird:
                     dx = self.target_x - self.x0
                     dy = self.target_y - self.y0
                     distance = (dx**2 + dy**2)**0.5
-                    self.total_time = distance / \
-                        (self.speed * FRAME_RATE)
+                    self.total_time = distance / (self.speed * FRAME_RATE)
                     self.t = 0
                     self.h = distance * 0.2
             else:
@@ -80,7 +90,7 @@ class Bird:
                     if self.total_time != 0:
                         self.t += delta_time / self.total_time
                     else:
-                        self.t += delta_time / (self.total_time+0.1)
+                        self.t += delta_time / (self.total_time+0.0001)
                     if self.t >= 1:
                         self.x = self.target_x
                         self.y = self.target_y
@@ -99,14 +109,10 @@ class Bird:
                     self.current_lamppost.current_birds.append(self)
 
     def fly_away(self):
-
         if self.current_lamppost and self in self.current_lamppost.current_birds:
             self.current_lamppost.current_birds.remove(self)
-
-        self.x = -100
-        self.y = -100
-        self.is_sitting = False
         self.current_lamppost = None
+        self.start_flying_up()
 
 
 class LampPost:
